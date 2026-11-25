@@ -1,0 +1,10 @@
+**/out/
+out/
+*.wav
+*.mp3
+*.blend1
+__pycache__/
+*.pyc
+.cache/
+.env
+*.token

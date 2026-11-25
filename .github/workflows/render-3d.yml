@@ -1,0 +1,252 @@
+name: Render 3D Clips Hub (Chars / Storyboard / Motion / 20x Full / Thumb)
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "Episode directory under episodes/<episode>"
+        required: true
+        default: "grease_fire"
+        type: string
+      mode:
+        description: "Pipeline stage: chars (Gate A), preview (Gate B), thumb (Stage 7), motion (short test), or full (20x render)"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - chars
+          - preview
+          - thumb
+          - motion
+          - full
+      project_slug:
+        description: "Output basename (optional, defaults to episode name)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  chars:
+    if: inputs.mode == 'chars'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      EP: ${{ inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender, Python deps, Xvfb, Mesa, and FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender python3-numpy xvfb libgl1 libglx-mesa0 libgl1-mesa-dri ffmpeg >/dev/null
+      - name: Validate episode files and render character sheets
+        run: |
+          test -f "episodes/${EP}/render_short.py"
+          cd "episodes/${EP}"
+          PYTHONPATH="${GITHUB_WORKSPACE}/engine:${PWD}:${PYTHONPATH:-}" \
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            blender --background --python-use-system-env --python-exit-code 1 \
+            --python render_short.py -- chars
+      - name: Tile character turnaround grid
+        run: |
+          cd "episodes/${EP}"
+          COUNT=$(ls out/chars/char_*.png 2>/dev/null | wc -l)
+          test "$COUNT" -ge 1
+          COLS=$(( COUNT <= 2 ? COUNT : 3 ))
+          ROWS=$(( (COUNT + COLS - 1) / COLS ))
+          ffmpeg -y -hide_banner -loglevel error \
+            -pattern_type glob -i "out/chars/char_*.png" \
+            -vf "scale=540:-2,tile=${COLS}x${ROWS}" -frames:v 1 out/char_sheet.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3d-chars-${{ inputs.episode }}
+          path: |
+            episodes/${{ inputs.episode }}/out/char_sheet.png
+            episodes/${{ inputs.episode }}/out/chars/*.png
+          retention-days: 3
+
+  preview:
+    if: inputs.mode == 'preview'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EP: ${{ inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender, Python deps, Xvfb, Mesa, and FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender python3-numpy xvfb libgl1 libglx-mesa0 libgl1-mesa-dri ffmpeg >/dev/null
+      - name: Render storyboard preview stills
+        run: |
+          test -f "episodes/${EP}/render_short.py"
+          cd "episodes/${EP}"
+          PYTHONPATH="${GITHUB_WORKSPACE}/engine:${PWD}:${PYTHONPATH:-}" \
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            blender --background --python-use-system-env --python-exit-code 1 \
+            --python render_short.py -- preview
+      - name: Build tiled storyboard grid
+        run: |
+          cd "episodes/${EP}"
+          COUNT=$(ls out/preview/prev_*.png 2>/dev/null | wc -l)
+          test "$COUNT" -ge 1
+          COLS=3
+          ROWS=$(( (COUNT + COLS - 1) / COLS ))
+          ffmpeg -y -hide_banner -loglevel error \
+            -pattern_type glob -i "out/preview/prev_*.png" \
+            -vf "scale=360:-2,tile=${COLS}x${ROWS}" -frames:v 1 out/storyboard_grid.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3d-preview-${{ inputs.episode }}
+          path: |
+            episodes/${{ inputs.episode }}/out/storyboard_grid.png
+            episodes/${{ inputs.episode }}/out/preview/*.png
+          retention-days: 3
+
+  thumb:
+    if: inputs.mode == 'thumb'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      EP: ${{ inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender, Python deps, Xvfb, Mesa, and FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender python3-numpy xvfb libgl1 libglx-mesa0 libgl1-mesa-dri ffmpeg >/dev/null
+      - name: Render 3D thumbnail still(s)
+        run: |
+          test -f "episodes/${EP}/render_short.py"
+          cd "episodes/${EP}"
+          PYTHONPATH="${GITHUB_WORKSPACE}/engine:${PWD}:${PYTHONPATH:-}" \
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            blender --background --python-use-system-env --python-exit-code 1 \
+            --python render_short.py -- thumb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3d-thumb-${{ inputs.episode }}
+          path: episodes/${{ inputs.episode }}/out/thumb/*.png
+          retention-days: 3
+
+  motion:
+    if: inputs.mode == 'motion'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EP: ${{ inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender, Python deps, Xvfb, Mesa, and FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender python3-numpy xvfb libgl1 libglx-mesa0 libgl1-mesa-dri ffmpeg >/dev/null
+      - name: Render motion smoke test
+        run: |
+          test -f "episodes/${EP}/render_short.py"
+          cd "episodes/${EP}"
+          PYTHONPATH="${GITHUB_WORKSPACE}/engine:${PWD}:${PYTHONPATH:-}" \
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            blender --background --python-use-system-env --python-exit-code 1 \
+            --python render_short.py -- motion
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3d-motion-${{ inputs.episode }}
+          path: |
+            episodes/${{ inputs.episode }}/out/motion/*.mp4
+            episodes/${{ inputs.episode }}/out/motion/*.png
+          retention-days: 3
+
+  render:
+    if: inputs.mode == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    env:
+      EP: ${{ inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender, Python deps, Xvfb, Mesa, and FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender python3-numpy xvfb libgl1 libglx-mesa0 libgl1-mesa-dri ffmpeg >/dev/null
+      - name: Render chunk ${{ matrix.chunk }} of 20
+        run: |
+          test -f "episodes/${EP}/render_short.py"
+          cd "episodes/${EP}"
+          PYTHONPATH="${GITHUB_WORKSPACE}/engine:${PWD}:${PYTHONPATH:-}" \
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            blender --background --python-use-system-env --python-exit-code 1 \
+            --python render_short.py -- chunk ${{ matrix.chunk }} 20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.chunk }}
+          path: episodes/${{ inputs.episode }}/out/ci_chunks/chunk_*.mp4
+          if-no-files-found: ignore
+          retention-days: 1
+
+  merge:
+    needs: render
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EP: ${{ inputs.episode }}
+      SLUG: ${{ inputs.project_slug || inputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: episodes/${{ inputs.episode }}/out/all_chunks
+          merge-multiple: true
+      - name: Concatenate chunks, mux audio if present, and verify
+        run: |
+          cd "episodes/${EP}"
+          COUNT=$(ls out/all_chunks/chunk_*.mp4 2>/dev/null | wc -l)
+          echo "Found $COUNT chunk file(s)"
+          test "$COUNT" -ge 1
+          for f in $(ls out/all_chunks/chunk_*.mp4 | sort); do
+            echo "file '$(pwd)/$f'" >> out/chunks.txt
+          done
+          ffmpeg -y -hide_banner -loglevel error \
+            -f concat -safe 0 -i out/chunks.txt \
+            -c:v copy out/silent_video.mp4
+          AUDIO=""
+          if [ -f "assets/audio/master_audio.m4a" ]; then
+            AUDIO="assets/audio/master_audio.m4a"
+          elif [ -f "assets/audio/vo_clean.m4a" ]; then
+            AUDIO="assets/audio/vo_clean.m4a"
+          fi
+          if [ -n "$AUDIO" ]; then
+            ffmpeg -y -hide_banner -loglevel error \
+              -i out/silent_video.mp4 -i "$AUDIO" \
+              -c:v copy -c:a copy -movflags +faststart \
+              "out/${SLUG}.mp4"
+          else
+            cp out/silent_video.mp4 "out/${SLUG}.mp4"
+          fi
+          ffprobe -v error \
+            -show_entries format=duration,size:stream=codec_type,codec_name,width,height,r_frame_rate,duration,nb_read_packets \
+            -count_packets -of default=noprint_wrappers=1 "out/${SLUG}.mp4"
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "out/${SLUG}.mp4" | awk '{printf "%.2f", $1}')
+          STEP=$(awk -v d="$DUR" 'BEGIN { s = d / 9.0; if (s < 0.1) s = 0.1; printf "%.4f", s }')
+          HERO_SS=$(awk -v d="$DUR" 'BEGIN { h = d - 2.0; if (h < 0.1) h = d * 0.5; printf "%.2f", h }')
+          ffmpeg -y -hide_banner -loglevel error \
+            -i "out/${SLUG}.mp4" \
+            -vf "fps=1/${STEP},scale=360:-2,tile=3x3" -frames:v 1 out/verify_contact_full.png
+          ffmpeg -y -hide_banner -loglevel error \
+            -ss "$HERO_SS" -i "out/${SLUG}.mp4" \
+            -frames:v 1 out/hero_final.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3d-final-${{ inputs.episode }}
+          path: |
+            episodes/${{ inputs.episode }}/out/*.mp4
+            episodes/${{ inputs.episode }}/out/verify_contact_full.png
+            episodes/${{ inputs.episode }}/out/hero_final.png
+          retention-days: 3
